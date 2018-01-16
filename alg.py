@@ -118,17 +118,22 @@ def get_phs(start, end):
     return df_phs.loc[match(start):match(end)]
 
 
-def rn(d):
-    return dtls.assign(sc=lambda x: x.title.apply(unicode).apply(lambda y: d.similarity(nlp(u" ".join([w.lemma_ for w in nlp(y.strip()) if not w.is_stop]))))).sort_values(["sc"], ascending=[0]).iloc[:10]
-
-
 def get_answer(q):
+    q = " ".join([x.strip(punctuation) for x in q.split(" ")])
+    q = nlp(q if isinstance(q, unicode) else unicode(q))
+    q = u" ".join([(x.lemma_ if x.text not in ["data"] else x.text)
+                   for x in q if not (x.is_stop or x.lower_ in ["bot", "help"])])
     q = nlp(q)
-    q = nlp(u" ".join([x.lemma_ for x in q if not (x.is_stop or x.lower_ in ["bot", "help"])]))
-    b = get_bounds(rn(q)[["title", "sc", "pageno"]].iloc[0].title)
-    display(HTML("".join(get_phs(*b)[:-1].apply(lambda x: "<p style=\"font-size:%dpx;font-family:Century Gothic;\">" % int(x.fqs * (1.25 if x.fqs > 16 else 1.))
-           + ("<b>" if "bold" in x.fqf.lower() else "")
-           + x.raw_text
-           + ("</b>" if "bold" in x.fqf.lower() else "")
-           + "</p>", axis=1))))
-
+    q_set = set(q.text.split())
+    def safe_hmean(citem):
+        try:
+            return hmean((citem.iloc[0], citem.iloc[1]))
+        except:
+            return 0.
+    ntdf = dtls.assign(
+        treated=lambda x: x.title.str.apply(unicode).apply(lambda x: nlp(u" ".join([(w.lemma_ if w.text not in ["data"] else w.text) for w in nlp(x.strip()) if not w.is_stop])))).assign(sc_sim=lambda x: x.treated.apply(lambda y: q.similarity(y))).assign(sc_eq=lambda x: x.treated.apply(lambda x: x.text).str.split(" ").apply(lambda y: float(len(q_set.intersection(y))) / max(len(q_set), len(y)))).copy(deep=True)
+    ntdf = ntdf.assign(sc_total=lambda x: x[["sc_sim", "sc_eq"]].apply(safe_hmean, axis=1))
+    ntdf = ntdf.sort_values(["sc_total", "sc_eq"], ascending=[0, 0]).drop_duplicates(subset="title").iloc[:10][["title", "sc_total", "pageno"]]
+    b = inxter(ntdf.iloc[0])
+    rpages = [(groupname, groupdf) for (groupname, groupdf) in get_phs_pg(*b).groupby("pageno")]
+    return rpages
